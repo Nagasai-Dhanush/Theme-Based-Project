@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Travel Cost & Impact Calculator</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .container {
+            width: 30%;
+            padding: 20px;
+            background-color: #4d7548;
+            box-shadow: 0 0 10px rgb(71, 160, 207);
+            overflow-y: auto;
+        }
+
+        #map {
+            flex: 1;
+            height: 100vh;
+        }
+
+        #app {
+            display: flex;
+            height: 100vh;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+        }
+
+        form input, form select, form button {
+            margin: 10px 0;
+            padding: 10px;
+            font-size: 1rem;
+        }
+
+        footer {
+            margin-top: 20px;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        #results p {
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <div class="container">
+            <h1>EZYGO</h1>
+            <form id="travelForm">
+                <input type="text" id="from" placeholder="Enter starting location" required>
+                <input type="text" id="to" placeholder="Enter destination" required>
+                <input type="number" id="mileage" placeholder="Enter vehicle mileage (km/L)" required>
+                <button type="submit">Calculate</button>
+            </form>
+            <div id="results" class="results">
+                <h2>Results:</h2>
+                <p id="costResult"></p>
+                <p id="impactResult"></p>
+                <p id="timeResult"></p> <!-- Added line for showing travel time -->
+            </div>
+            <footer>
+                <p>"Sustainable travel starts with awareness."</p>
+            </footer>
+        </div>
+        <div id="map"></div>
+    </div>
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet-routing-machine/3.2.12/leaflet-routing-machine.min.js"></script>
+    <script>
+        const RAPID_API_KEY = "00711753cfmsh0775661af3926f2p1e7393jsne2bce2dcf91e"; // Replace with your actual key
+        const FUEL_PRICE_INR = 109; // Example: Rs. 109 per liter
+        const EMISSION_RATES = { car: 0.1215, bike: 0.3, bus: 0.934 }; // kg CO₂ per km
+
+        // Initialize Map
+        const map = L.map('map').setView([51.505, -0.09], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+        }).addTo(map);
+
+        const routingControl = L.Routing.control({
+            waypoints: [],
+            routeWhileDragging: true,
+            createMarker: function() { return null; }
+        }).addTo(map);
+
+        // Form Submission
+        document.getElementById('travelForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const from = document.getElementById('from').value;
+            const to = document.getElementById('to').value;
+            const mileage = parseFloat(document.getElementById('mileage').value);
+
+            if (!from || !to || !mileage || mileage <= 0) {
+                alert('Please fill in all fields with valid data.');
+                return;
+            }
+
+            // Fetch coordinates for "from" and "to"
+            const fromCoords = await fetchLocation(from);
+            const toCoords = await fetchLocation(to);
+
+            if (fromCoords && toCoords) {
+                routingControl.setWaypoints([ 
+                    L.latLng(fromCoords.lat, fromCoords.lng), 
+                    L.latLng(toCoords.lat, toCoords.lng)
+                ]);
+
+                // Fetch distance and duration
+                const travelData = await fetchDistance(fromCoords, toCoords);
+                if (travelData) {
+                    const { distance, duration } = travelData;
+                    calculateAndDisplayResults(distance, mileage, duration);
+                }
+            }
+        });
+
+        // Fetch location coordinates
+        async function fetchLocation(query) {
+            const url = `https://google-map-places.p.rapidapi.com/maps/api/place/textsearch/json?query=${encodeURIComponent(query)}&region=en`;
+            const options = {
+                method: 'GET',
+                headers: {
+                    'X-RapidAPI-Key': RAPID_API_KEY,
+                    'X-RapidAPI-Host': 'google-map-places.p.rapidapi.com'
+                }
+            };
+            try {
+                const response = await fetch(url, options);
+                const data = await response.json();
+                if (data.results && data.results.length > 0) {
+                    const { lat, lng } = data.results[0].geometry.location;
+                    return { lat, lng };
+                }
+                alert(`Location not found: ${query}`);
+            } catch (error) {
+                console.error('Error fetching location:', error);
+            }
+            return null;
+        }
+
+        // Fetch distance and duration
+        async function fetchDistance(fromCoords, toCoords) {
+            const url = `https://google-map-places.p.rapidapi.com/maps/api/directions/json?origin=${fromCoords.lat},${fromCoords.lng}&destination=${toCoords.lat},${toCoords.lng}&region=en`;
+            const options = {
+                method: 'GET',
+                headers: {
+                    'X-RapidAPI-Key': RAPID_API_KEY,
+                    'X-RapidAPI-Host': 'google-map-places.p.rapidapi.com'
+                }
+            };
+            try {
+                const response = await fetch(url, options);
+                const data = await response.json();
+                if (data.routes && data.routes.length > 0) {
+                    const route = data.routes[0].legs[0];
+                    const distance = route.distance.value / 1000; // Distance in kilometers
+                    const duration = route.duration.text; // Duration in readable format (e.g., "1 hour 30 mins")
+                    return { distance, duration };
+                }
+                alert('Could not calculate distance.');
+            } catch (error) {
+                console.error('Error fetching distance:', error);
+            }
+            return null;
+        }
+
+        // Calculate bus fare based on distance
+        function calculateBusFare(distance) {
+            let fare = 0;
+            
+            // Ensure minimum fare is ₹15
+            if (distance <= 0) {
+                return 15;
+            }
+
+            // Fare Calculation based on distance slabs
+            if (distance <= 40) {
+                fare = distance * 5;
+            } else if (distance <= 100) {
+                fare = 40 * 5 + (distance - 40) * 4;
+            } else if (distance <= 200) {
+                fare = 40 * 5 + 60 * 4 + (distance - 100) * 3.5;
+            } else {
+                fare = 40 * 5 + 60 * 4 + 100 * 3.5 + (distance - 200) * 3;
+            }
+
+            // Ensure the fare is at least ₹15
+            return Math.max(fare, 15);
+        }
+
+        // Calculate cost, impact, and display results including travel time
+        function calculateAndDisplayResults(distance, mileage, duration) {
+            const results = [];
+            for (const mode in EMISSION_RATES) {
+                const impact = calculateImpact(distance, mode);
+
+                // For bus, calculate fare based on distance (and exclude cost)
+                let busFare = 0;
+                if (mode === 'bus') {
+                    busFare = calculateBusFare(distance);
+                }
+
+                results.push({ mode, impact, busFare });
+            }
+
+            const costResult = results.map(r => {
+                return `Mode: ${r.mode}, Emission: ${r.impact.toFixed(2)} kg CO₂, Bus Fare: ₹${r.busFare.toFixed(2)}`;
+            }).join('<br>');
+
+            document.getElementById('costResult').innerHTML = `<strong>Bus Fare Comparison:</strong><br>${costResult}`;
+
+            const bestMode = results.reduce((prev, curr) => (curr.impact < prev.impact ? curr : prev));
+            document.getElementById('impactResult').innerText = `Best Mode (Eco-Friendly) between bike and car: ${bestMode.mode} with ${bestMode.impact.toFixed(2)} kg CO₂`;
+
+            // Display travel time
+            document.getElementById('timeResult').innerText = `Estimated Travel Time: ${duration}`;
+        }function calculateCost(distance, mileage) {
+            return (distance / mileage) * FUEL_PRICE_INR;
+        }
+
+        function calculateImpact(distance, mode) {
+            return distance * (EMISSION_RATES[mode] || EMISSION_RATES.car);
+        }
+    </script>
+</body>
+</html>
